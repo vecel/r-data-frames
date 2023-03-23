@@ -6,6 +6,10 @@ Posts <- read.csv("Comments.csv.gz")
 
 library(sqldf)
 library(dplyr)
+library(data.table)
+setDT(Comments)
+setDT(Users)
+setDT(Posts)
 
 
 sql_1 <- function(Users) {
@@ -60,14 +64,26 @@ dplyr_1 <- function(Users) {
   # as.data.frame(df)
 }
 
-all_equal(
-  sql_1(Users),
-  base_1(Users),
-  dplyr_1(Users)
-)
+table_1 <- function(Users) {
+  Users[ 
+    Location != "", .(TotalUpVotes = sum( UpVotes )), by=Location
+      ][order(-TotalUpVotes)
+        ][1:10]
+  # Z Users
+  # wybieram wiersze, gdzie Location nie jest puste, wyliczam sume UpVotes grupujac po Location
+  # wynik sortuje niemalejaco po -TotalUpVotes (czyli nierosnaco po TotalUpVotes)
+  # i wybieram 10 pierwszych wierszy poprzedniego wyniku
+}
 
-compare::compare(
-  sql_1(Users),
-  base_1(Users),
-  dplyr(Users)
-)
+all_equal( sql_1(Users), base_1(Users) )
+all_equal( sql_1(Users), dplyr_1(Users) )
+all_equal( sql_1(Users), table_1(Users) )
+
+# microbenchmark::microbenchmark(
+#   sqldf = sql_1(Users),
+#   base = base_1(Users),
+#   dplyr = dplyr_1(Users),
+#   table = table_1(Users)
+# )
+
+
