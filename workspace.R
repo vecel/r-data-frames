@@ -2,7 +2,7 @@
 
 Comments <- read.csv("Comments.csv.gz")
 Users <- read.csv("Users.csv.gz")
-Posts <- read.csv("Comments.csv.gz")
+Posts <- read.csv("Posts.csv.gz")
 
 library(sqldf)
 library(dplyr)
@@ -11,7 +11,8 @@ setDT(Comments)
 setDT(Users)
 setDT(Posts)
 
-
+{
+  
 sql_1 <- function(Users) {
   sqldf("
     SELECT Location, SUM(UpVotes) as TotalUpVotes
@@ -86,4 +87,49 @@ all_equal( sql_1(Users), table_1(Users) )
 #   table = table_1(Users)
 # )
 
+}
 
+{
+
+sql_2 <- function(Posts) {
+  sqldf("SELECT STRFTIME('%Y', CreationDate) AS Year, STRFTIME('%m', CreationDate) AS Month,
+    COUNT(*) AS PostsNumber, MAX(Score) AS MaxScore
+    FROM Posts
+    WHERE PostTypeId IN (1, 2)
+    GROUP BY Year, Month
+    HAVING PostsNumber > 1000")
+}
+
+base_2 <- function(Posts) {
+  # Dodaje kolumny Year i Month
+  df <- cbind(Posts, Year = sprintf("%04d", year(Posts$CreationDate)), Month = sprintf("%02d", month(Posts$CreationDate)))
+  
+  # Usuwam wiersze, w ktorych PostTypeId jest rozne od 1 i 2
+  df <- df[ df$PostTypeId %in% c(1, 2), ]
+  
+  # Grupuje po Year i Month, zliczam liczbe rekordow i max ze Score w kazdej grupie
+  df <- aggregate(
+    cbind(df$Score),
+    by=list(df$Year, df$Month),
+    FUN = function(x) c(length(x), max(x))
+  )
+  
+  # Wynikiem powyzszego aggregate jest ramka danych, w ktorej podsumowane wyniki
+  # sa macierzami a nie kolumnami. Tutaj "wyplaszczam" wynik do zwyklej ramki damych
+  df <- do.call(data.frame, df)
+  
+  # Naprawiam nazwy kolumn
+  colnames(df) <- c("Year", "Month", "PostsNumber", "MaxScore")
+  
+  # Usuwam wiersze, w ktorych PostsNumber jest <= 1000
+  df <- df[ df$PostsNumber > 1000, ]
+  
+  # dla estetyki sortuje i naprawiam numeracje wierszy
+  df <- df[ order(df$Year, df$Month), ]
+  rownames(df) <- NULL
+  df
+}
+
+all_equal(sql_2(Posts), base_2(Posts))
+
+}
