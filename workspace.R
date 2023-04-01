@@ -161,12 +161,12 @@ all_equal(sql_2(Posts), base_2(Posts))
 all_equal(sql_2(Posts), dplyr_2(Posts))
 all_equal(sql_2(Posts), table_2(Posts))
 
-microbenchmark::microbenchmark(
-  sqldf = sql_2(Posts),
-  base = base_2(Posts),
-  dplyr = dplyr_2(Posts),
-  table = table_2(Posts)
-)
+# microbenchmark::microbenchmark(
+#   sqldf = sql_2(Posts),
+#   base = base_2(Posts),
+#   dplyr = dplyr_2(Posts),
+#   table = table_2(Posts)
+# )
 
 }
 
@@ -203,7 +203,12 @@ base_3 <- function(Posts, Users) {
   
   # Lacze ramki Users i Questions po wartosci Id
   # Lacze te i tylko te wiersze, ktore maja Users.Id = Questions.OwnerUserId, wiersze bez pary nie sa brane pod uwage
-  df <- inner_join(Users, Questions, by=join_by(Id == OwnerUserId))
+  df <- merge(
+    Users,
+    Questions,
+    by.x="Id",
+    by.y="OwnerUserId"
+  )
   
   # Wybieram interesujace mnie kolumny
   df <- df[ , c("Id", "DisplayName", "TotalViews")]
@@ -268,11 +273,157 @@ all_equal(sql_3_result, dplyr_3_result)
 all_equal(sql_3_result, table_3_result)
 
 # Wywolanie ponizszej funkcji trwa (pewnie) okolo 40 min
-microbenchmark::microbenchmark(
-  sqldf = sql_3(Posts),
-  base = base_3(Posts),
-  dplyr = dplyr_3(Posts),
-  table = table_3(Posts),
-  times = 10
-)
+# microbenchmark::microbenchmark(
+#   sqldf = sql_3(Posts),
+#   base = base_3(Posts),
+#   dplyr = dplyr_3(Posts),
+#   table = table_3(Posts),
+#   times = 10
+# )
+
 }
+
+{
+  
+sql_4 <- function(Posts, Users) {
+  sqldf("SELECT DisplayName, QuestionsNumber, AnswersNumber, Location, Reputation, UpVotes, DownVotes
+    FROM (
+      SELECT *
+      FROM (
+        SELECT COUNT(*) as AnswersNumber, OwnerUserId
+        FROM Posts
+        WHERE PostTypeId = 2
+        GROUP BY OwnerUserId
+        ) AS Answers
+      JOIN
+        (
+          SELECT COUNT(*) as QuestionsNumber, OwnerUserId
+          FROM Posts
+          WHERE PostTypeId = 1
+          GROUP BY OwnerUserId
+        ) AS Questions
+      ON Answers.OwnerUserId = Questions.OwnerUserId
+      WHERE AnswersNumber > QuestionsNumber
+      ORDER BY AnswersNumber DESC
+      LIMIT 5
+      ) AS PostsCounts
+    JOIN Users
+    ON PostsCounts.OwnerUserId = Users.Id")
+}
+
+base_4 <- function(Posts, Users) {
+  Answers <- Posts[ Posts$PostTypeId == 2, ]
+  Answers <- aggregate(
+    Answers$OwnerUserId,
+    by=list(Answers$OwnerUserId),
+    length
+  )
+  Answers <- Answers[, c(2,1)]
+  colnames(Answers) <- c("AnswersNumber", "OwnerUserId")
+  
+  # Uwaga: base pomija NA, sqldf zlicza je jako jedna grupe
+  
+  Questions <- Posts[ Posts$PostTypeId == 1, ]
+  Questions <- aggregate(
+    Questions$OwnerUserId,
+    by=list(Questions$OwnerUserId),
+    length
+  )
+  Questions <- Questions[, c(2,1)]
+  colnames(Questions) <- c("QuestionsNumber", "OwnerUserId")
+  
+  PostsCount <- merge(
+    Answers,
+    Questions,
+    by="OwnerUserId"
+  )
+  PostsCount <- PostsCount[ PostsCount$AnswersNumber > PostsCount$QuestionsNumber, ]
+  PostsCount <- PostsCount[ order(PostsCount$AnswersNumber, decreasing = TRUE), ]
+  PostsCount <- PostsCount[1:5, ]
+  
+  df <- merge(
+    Users,
+    PostsCount,
+    by.x="Id",
+    by.y="OwnerUserId"
+  )
+  df <- df[ , c("DisplayName", "QuestionsNumber", "AnswersNumber", "Location", "Reputation", "UpVotes", "DownVotes")]
+  return(df)
+}
+
+dplyr_4 <- function(Posts, Users) {
+  Answers <- Posts %>%
+    filter(PostTypeId == 2) %>%
+    group_by(OwnerUserId) %>%
+    summarise(AnswersNumber = n())
+  
+  Questions <- Posts %>%
+    filter(PostTypeId == 1) %>%
+    group_by(OwnerUserId) %>%
+    summarise(QuestionsNumber = n())
+  
+  PostsCount <- inner_join(
+    Answers,
+    Questions,
+    by=join_by(OwnerUserId)
+  ) %>%
+    filter(AnswersNumber > QuestionsNumber & !is.na(OwnerUserId)) %>%
+    arrange(desc(AnswersNumber)) %>%
+    slice_head(n=5)
+  
+  inner_join(
+    Users,
+    PostsCount,
+    by=join_by(Id==OwnerUserId)
+  ) %>%
+    select(DisplayName, QuestionsNumber, AnswersNumber, Location, Reputation, UpVotes, DownVotes)
+}
+
+table_4 <- function(Posts, Users) {
+  Answers <- Posts[
+    PostTypeId==2, 
+    .(AnswersNumber = .N),
+    by=OwnerUserId]
+  
+  Questions <- Posts[
+    PostTypeId==1,
+    .(QuestionsNumber = .N),
+    by=OwnerUserId]
+  
+  PostsCount <- merge(
+    Answers,
+    Questions,
+    by="OwnerUserId"
+  )[!is.na(OwnerUserId) & AnswersNumber > QuestionsNumber][
+    order(AnswersNumber, decreasing = TRUE)
+  ][1:5]
+  
+  merge(
+    Users,
+    PostsCount,
+    by.x="Id",
+    by.y="OwnerUserId"
+  )[, c("DisplayName", "QuestionsNumber", "AnswersNumber", "Location", "Reputation", "UpVotes", "DownVotes")]
+  
+}
+
+sql_4_result <- sql_4(Posts, Users)
+base_4_result <- base_4(Posts, Users)
+dplyr_4_result <- dplyr_4(Posts, Users)
+table_4_result <- table_4(Posts, Users)
+
+all_equal(sql_4_result, base_4_result)
+all_equal(sql_4_result, dplyr_4_result)
+all_equal(sql_4_result, table_4_result)
+
+microbenchmark::microbenchmark(
+  sqldf = sql_4(Posts, Users),
+  base = base_4(Posts, Users),
+  dplyr = dplyr_4(Posts, Users),
+  table = table_4(Posts, Users)
+)
+
+}
+
+
+
